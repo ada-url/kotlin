@@ -1,8 +1,80 @@
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+
 plugins {
     kotlin("multiplatform") version "2.1.20"
     `maven-publish`
     id("org.jlleitschuh.gradle.ktlint") version "12.2.0"
 }
+
+// Abstract task class so Gradle can inject ExecOperations (Gradle 9-compatible
+// replacement for the removed project.exec {} API).
+abstract class BuildAdaLibTask
+    @Inject
+    constructor(
+        private val execOps: ExecOperations,
+    ) : DefaultTask() {
+        @get:InputFiles
+        abstract val depsSources: ConfigurableFileCollection
+
+        @get:OutputFile
+        abstract val outputLib: RegularFileProperty
+
+        @TaskAction
+        fun build() {
+            val libFile = outputLib.get().asFile
+            val outDir = libFile.parentFile
+            val depsDir = depsSources.files.first().parentFile
+            outDir.mkdirs()
+
+            val isLinux = System.getProperty("os.name") == "Linux"
+            val mainCompiler = System.getenv("CXX") ?: "c++"
+            val adaObjFile = outDir.resolve("ada.o")
+
+            val compileCmd =
+                if (isLinux) {
+                    val konanDepsDir = "${System.getProperty("user.home")}/.konan/dependencies"
+                    val gccDir =
+                        File(konanDepsDir)
+                            .listFiles { f -> f.isDirectory && f.name.startsWith("x86_64-unknown-linux-gnu-gcc") }
+                            ?.firstOrNull()
+                            ?: error(
+                                "KN GCC toolchain not found in $konanDepsDir. " +
+                                    "It is downloaded automatically on first use — ensure the KN " +
+                                    "plugin has run at least once (e.g. via the cinterop task).",
+                            )
+                    val konanGpp = "${gccDir.absolutePath}/bin/x86_64-unknown-linux-gnu-g++"
+                    val sysroot = "${gccDir.absolutePath}/x86_64-unknown-linux-gnu/sysroot"
+                    val compatObjFile = outDir.resolve("string_compat.o")
+                    // Compile ada.cpp with the system C++ compiler (C++20 support), then
+                    // compile the ABI-compat shim with KN's GCC 8.3 (matching KN's libstdc++).
+                    """
+                    "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
+                        -I"${depsDir.absolutePath}" \
+                        -c "${depsDir.absolutePath}/ada.cpp" \
+                        -o "$adaObjFile" && \
+                    "$konanGpp" -std=c++14 -O2 -fPIC \
+                        --sysroot="$sysroot" \
+                        -c "${depsDir.absolutePath}/string_compat.cpp" \
+                        -o "$compatObjFile" && \
+                    ar rcs "$libFile" "$adaObjFile" "$compatObjFile"
+                    """.trimIndent()
+                } else {
+                    """
+                    "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
+                        -I"${depsDir.absolutePath}" \
+                        -c "${depsDir.absolutePath}/ada.cpp" \
+                        -o "$adaObjFile" && \
+                    ar rcs "$libFile" "$adaObjFile"
+                    """.trimIndent()
+                }
+
+            execOps.exec {
+                commandLine("sh", "-c", compileCmd)
+            }
+        }
+    }
 
 group = "com.adaurl"
 version = "1.0.0"
@@ -11,77 +83,32 @@ repositories {
     mavenCentral()
 }
 
-// Build the Ada static library from the single-header C++ source.
-//
-// Ada requires C++20. On Linux, KN statically links GCC 8.3's libstdc++, which
-// lacks std::string::_M_replace_cold — a cold-path helper emitted by GCC 13+.
-// We compile a compat shim (string_compat.cpp) with KN's own GCC 8.3 toolchain
-// (ABI-compatible with KN's libstdc++) and add it to libada.a so the symbol is
-// defined. ada.cpp itself is compiled with the system C++ compiler (GCC 13) since
-// GCC 8.3 lacks C++20 headers (<bit>, <ranges>, <version>, …).
-val buildAdaLib by tasks.registering(Exec::class) {
-    val depsDir = file("deps")
-    val outDir = layout.buildDirectory.dir("ada").get().asFile
-    val hostOs = System.getProperty("os.name")
-    val konanDepsDir = "${System.getProperty("user.home")}/.konan/dependencies"
-
-    doFirst { outDir.mkdirs() }
-
-    val mainCompiler = System.getenv("CXX") ?: "c++"
-    val adaObjFile = outDir.resolve("ada.o")
-    val libFile = outDir.resolve("libada.a")
-
-    val compileCmd: String
-    if (hostOs == "Linux") {
-        val gccDir =
-            File(konanDepsDir)
-                .listFiles { f -> f.isDirectory && f.name.startsWith("x86_64-unknown-linux-gnu-gcc") }
-                ?.firstOrNull() ?: error("KN GCC dir not found in $konanDepsDir")
-        val konanGpp = "${gccDir.absolutePath}/bin/x86_64-unknown-linux-gnu-g++"
-        val sysroot = "${gccDir.absolutePath}/x86_64-unknown-linux-gnu/sysroot"
-        val compatObjFile = outDir.resolve("string_compat.o")
-
-        compileCmd =
-            """
-            # Compile ada.cpp with system C++ compiler (C++20 support)
-            "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
-                -I"${depsDir.absolutePath}" \
-                -c "${depsDir.absolutePath}/ada.cpp" \
-                -o "$adaObjFile" && \
-            # Compile the ABI-compat shim with KN's GCC 8.3 (same ABI as KN's libstdc++)
-            "$konanGpp" -std=c++14 -O2 -fPIC \
-                --sysroot="$sysroot" \
-                -c "${depsDir.absolutePath}/string_compat.cpp" \
-                -o "$compatObjFile" && \
-            ar rcs "$libFile" "$adaObjFile" "$compatObjFile"
-            """.trimIndent()
-    } else {
-        compileCmd =
-            """
-            "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
-                -I"${depsDir.absolutePath}" \
-                -c "${depsDir.absolutePath}/ada.cpp" \
-                -o "$adaObjFile" && \
-            ar rcs "$libFile" "$adaObjFile"
-            """.trimIndent()
-    }
-
-    commandLine("sh", "-c", compileCmd)
-
-    inputs.files(fileTree(depsDir) { include("*.cpp", "*.h") })
-    outputs.file(libFile)
+// Register the Ada static library build task.
+// Logic lives in BuildAdaLibTask above; all path resolution is deferred to
+// execution time so the KN toolchain has been downloaded before we need it.
+val buildAdaLib by tasks.registering(BuildAdaLibTask::class) {
+    depsSources.from(fileTree("deps") { include("*.cpp", "*.h") })
+    outputLib = layout.buildDirectory.file("ada/libada.a")
 }
 
-val adaLibFile = layout.buildDirectory.file("ada/libada.a")
+val adaLibFile = buildAdaLib.flatMap { (it as BuildAdaLibTask).outputLib }
+
+// Only declare targets that can be built on the current host.
+// Apple targets require a macOS host when cinterop is involved; Linux can only
+// build linuxX64. See: https://kotl.in/native-targets-tiers
+val hostOs = System.getProperty("os.name")
+val hostArch = System.getProperty("os.arch")
 
 kotlin {
-    // Declare all targets we support; only the one matching the host will build locally.
     val nativeTargets =
-        listOf(
-            linuxX64("linuxX64"),
-            macosX64("macosX64"),
-            macosArm64("macosArm64"),
-        )
+        when {
+            hostOs == "Linux" -> listOf(linuxX64("linuxX64"))
+            hostOs == "Mac OS X" && hostArch == "aarch64" ->
+                listOf(macosArm64("macosArm64"))
+            hostOs == "Mac OS X" ->
+                listOf(macosX64("macosX64"))
+            else -> error("Unsupported host: $hostOs / $hostArch")
+        }
 
     nativeTargets.forEach { target ->
         target.compilations["main"].apply {
@@ -118,21 +145,29 @@ kotlin {
             }
         }
 
-        // Wire platform source sets into the shared native source sets.
-        listOf("linuxX64Main", "macosX64Main", "macosArm64Main").forEach { name ->
-            getByName(name).dependsOn(nativeMain)
-        }
-        listOf("linuxX64Test", "macosX64Test", "macosArm64Test").forEach { name ->
-            getByName(name).dependsOn(nativeTest)
+        // Wire the host-specific source sets into the shared native source sets.
+        targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().forEach { t ->
+            getByName("${t.name}Main").dependsOn(nativeMain)
+            getByName("${t.name}Test").dependsOn(nativeTest)
         }
     }
 }
 
-// Ensure the Ada static library is built before any cinterop or Kotlin compilation task.
+// buildAdaLib needs the KN GCC 8.3 toolchain on Linux, which is downloaded lazily
+// the first time a cinterop task executes. So the order must be:
+//   cinterop → buildAdaLib → compile/link
+// We wire this in two steps:
+//   1. buildAdaLib depends on all cinterop tasks (ensures toolchain is present)
+//   2. compile/link tasks depend on buildAdaLib (ensures libada.a is embedded)
 tasks.matching { task ->
-    task.name.contains("cinterop", ignoreCase = true) ||
-        task.name.startsWith("compile") ||
+    task.name.startsWith("compile") ||
         task.name.startsWith("link")
 }.configureEach {
     dependsOn(buildAdaLib)
+}
+
+tasks.matching { task ->
+    task.name.contains("cinterop", ignoreCase = true)
+}.configureEach {
+    buildAdaLib.get().mustRunAfter(this)
 }

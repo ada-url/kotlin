@@ -10,6 +10,9 @@ jobs:
   update:
     name: Update Ada single-header
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,22 +37,72 @@ jobs:
           VERSION=$(grep -oP '(?<=ADA_VERSION ")[^"]+' deps/ada.h | head -1)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Commit and push updated deps
+      - name: Commit updated deps
         if: steps.diff.outputs.changed == 'true'
         env:
           ADA_VERSION: ${{ steps.version.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/update-ada-${ADA_VERSION}
           git add deps/
           git commit -m "chore: update ada to ${ADA_VERSION}"
-          git push
+          git push -u origin chore/update-ada-${ADA_VERSION}
+
+  test:
+    name: Build & Test (${{ matrix.os }})
+    needs: update
+    if: needs.update.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            test-task: linuxX64Test
+          - os: macos-15
+            test-task: macosX64Test
+          - os: macos-14
+            test-task: macosArm64Test
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/update-ada-${{ needs.update.outputs.version }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Konan toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-konan-
+
+      - name: Run tests
+        run: gradle ${{ matrix.test-task }}
+
+  open-pr:
+    name: Open pull request
+    needs: [update, test]
+    if: needs.update.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/update-ada-${{ needs.update.outputs.version }}
 
       - name: Open pull request
-        if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          title: "chore: update Ada to ${{ steps.version.outputs.version }}"
-          body: "Automated update of the Ada single-header files to version ${{ steps.version.outputs.version }}."
-          branch: chore/update-ada-${{ steps.version.outputs.version }}
+          title: "chore: update Ada to ${{ needs.update.outputs.version }}"
+          body: "Automated update of the Ada single-header files to version ${{ needs.update.outputs.version }}."
+          branch: chore/update-ada-${{ needs.update.outputs.version }}
           labels: dependencies

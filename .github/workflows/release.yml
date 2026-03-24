@@ -20,7 +20,7 @@ jobs:
         include:
           - os: ubuntu-latest
             test-task: linuxX64Test
-          - os: macos-13
+          - os: macos-15
             test-task: macosX64Test
           - os: macos-14
             test-task: macosArm64Test
