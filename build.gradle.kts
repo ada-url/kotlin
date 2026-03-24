@@ -1,7 +1,7 @@
 plugins {
     kotlin("multiplatform") version "2.1.20"
     `maven-publish`
-    id("org.jlleitschuh.gradle.ktlint") version "12.2.0"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
 group = "com.adaurl"
