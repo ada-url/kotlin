@@ -98,7 +98,7 @@ jobs:
           ref: chore/update-ada-${{ needs.update.outputs.version }}
 
       - name: Open pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           title: "chore: update Ada to ${{ needs.update.outputs.version }}"
           body: "Automated update of the Ada single-header files to version ${{ needs.update.outputs.version }}."
