@@ -1,3 +1,4 @@
+import java.util.Base64
 import javax.inject.Inject
 import org.gradle.process.ExecOperations
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -102,10 +103,7 @@ kotlin {
     val nativeTargets =
         when {
             hostOs == "Linux" -> listOf(linuxX64("linuxX64"))
-            hostOs == "Mac OS X" && hostArch == "aarch64" ->
-                listOf(macosArm64("macosArm64"))
-            hostOs == "Mac OS X" ->
-                listOf(macosX64("macosX64"))
+            hostOs == "Mac OS X" -> listOf(macosArm64("macosArm64"))
             else -> error("Unsupported host: $hostOs / $hostArch")
         }
 
@@ -209,11 +207,12 @@ publishing {
 }
 
 signing {
-    // Use in-memory PGP key supplied via environment variables (CI-friendly).
-    // Locally, falls back to gpg-agent if the env vars are absent.
-    val signingKey = providers.environmentVariable("SIGNING_KEY").orNull
+    // SIGNING_KEY is stored as a base64-encoded ASCII-armored PGP private key to
+    // avoid multiline secret mangling in GitHub Actions. Decode it before use.
+    val signingKeyBase64 = providers.environmentVariable("SIGNING_KEY").orNull
     val signingPassword = providers.environmentVariable("SIGNING_PASSWORD").orNull
-    if (signingKey != null && signingPassword != null) {
+    if (signingKeyBase64 != null && signingPassword != null) {
+        val signingKey = String(Base64.getDecoder().decode(signingKeyBase64))
         useInMemoryPgpKeys(signingKey, signingPassword)
     }
     sign(publishing.publications)
