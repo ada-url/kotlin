@@ -77,7 +77,7 @@ abstract class BuildAdaLibTask
         }
     }
 
-group = "com.adaurl"
+group = "com.ada-url"
 version = "0.1.0"
 
 repositories {
