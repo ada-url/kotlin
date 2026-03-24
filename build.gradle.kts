@@ -3,9 +3,9 @@ import org.gradle.process.ExecOperations
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
-    kotlin("multiplatform") version "2.1.20"
+    kotlin("multiplatform") version "2.3.20"
     `maven-publish`
-    id("org.jlleitschuh.gradle.ktlint") version "12.2.0"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
 // Abstract task class so Gradle can inject ExecOperations (Gradle 9-compatible
@@ -15,8 +15,8 @@ abstract class BuildAdaLibTask
     constructor(
         private val execOps: ExecOperations,
     ) : DefaultTask() {
-        @get:InputFiles
-        abstract val depsSources: ConfigurableFileCollection
+        @get:InputDirectory
+        abstract val depsDir: DirectoryProperty
 
         @get:OutputFile
         abstract val outputLib: RegularFileProperty
@@ -25,7 +25,7 @@ abstract class BuildAdaLibTask
         fun build() {
             val libFile = outputLib.get().asFile
             val outDir = libFile.parentFile
-            val depsDir = depsSources.files.first().parentFile
+            val deps = depsDir.get().asFile
             outDir.mkdirs()
 
             val isLinux = System.getProperty("os.name") == "Linux"
@@ -51,20 +51,20 @@ abstract class BuildAdaLibTask
                     // compile the ABI-compat shim with KN's GCC 8.3 (matching KN's libstdc++).
                     """
                     "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
-                        -I"${depsDir.absolutePath}" \
-                        -c "${depsDir.absolutePath}/ada.cpp" \
+                        -I"${deps.absolutePath}" \
+                        -c "${deps.absolutePath}/ada.cpp" \
                         -o "$adaObjFile" && \
-                    "$konanGpp" -std=c++14 -O2 -fPIC \
+                    "$konanGpp" -std=c++11 -O2 -fPIC \
                         --sysroot="$sysroot" \
-                        -c "${depsDir.absolutePath}/string_compat.cpp" \
+                        -c "${deps.absolutePath}/string_compat.cpp" \
                         -o "$compatObjFile" && \
                     ar rcs "$libFile" "$adaObjFile" "$compatObjFile"
                     """.trimIndent()
                 } else {
                     """
                     "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
-                        -I"${depsDir.absolutePath}" \
-                        -c "${depsDir.absolutePath}/ada.cpp" \
+                        -I"${deps.absolutePath}" \
+                        -c "${deps.absolutePath}/ada.cpp" \
                         -o "$adaObjFile" && \
                     ar rcs "$libFile" "$adaObjFile"
                     """.trimIndent()
@@ -87,11 +87,9 @@ repositories {
 // Logic lives in BuildAdaLibTask above; all path resolution is deferred to
 // execution time so the KN toolchain has been downloaded before we need it.
 val buildAdaLib by tasks.registering(BuildAdaLibTask::class) {
-    depsSources.from(fileTree("deps") { include("*.cpp", "*.h") })
+    depsDir = layout.projectDirectory.dir("deps")
     outputLib = layout.buildDirectory.file("ada/libada.a")
 }
-
-val adaLibFile = buildAdaLib.flatMap { (it as BuildAdaLibTask).outputLib }
 
 // Only declare targets that can be built on the current host.
 // Apple targets require a macOS host when cinterop is involved; Linux can only
@@ -122,7 +120,7 @@ kotlin {
             compileTaskProvider.configure {
                 compilerOptions {
                     freeCompilerArgs.add(
-                        provider { "-include-binary=${adaLibFile.get().asFile.absolutePath}" },
+                        buildAdaLib.flatMap { it.outputLib }.map { "-include-binary=${it.asFile.absolutePath}" },
                     )
                 }
             }
@@ -146,7 +144,7 @@ kotlin {
         }
 
         // Wire the host-specific source sets into the shared native source sets.
-        targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().forEach { t ->
+        targets.withType<KotlinNativeTarget>().forEach { t ->
             getByName("${t.name}Main").dependsOn(nativeMain)
             getByName("${t.name}Test").dependsOn(nativeTest)
         }
@@ -157,17 +155,19 @@ kotlin {
 // the first time a cinterop task executes. So the order must be:
 //   cinterop → buildAdaLib → compile/link
 // We wire this in two steps:
-//   1. buildAdaLib depends on all cinterop tasks (ensures toolchain is present)
+//   1. buildAdaLib mustRunAfter all cinterop tasks (ensures toolchain is present)
 //   2. compile/link tasks depend on buildAdaLib (ensures libada.a is embedded)
-tasks.matching { task ->
-    task.name.startsWith("compile") ||
-        task.name.startsWith("link")
-}.configureEach {
-    dependsOn(buildAdaLib)
-}
+tasks
+    .matching { task ->
+        task.name.startsWith("compile") ||
+            task.name.startsWith("link")
+    }.configureEach {
+        dependsOn(buildAdaLib)
+    }
 
-tasks.matching { task ->
-    task.name.contains("cinterop", ignoreCase = true)
-}.configureEach {
-    buildAdaLib.get().mustRunAfter(this)
-}
+tasks
+    .matching { task ->
+        task.name.contains("cinterop", ignoreCase = true)
+    }.configureEach {
+        buildAdaLib.get().mustRunAfter(this)
+    }

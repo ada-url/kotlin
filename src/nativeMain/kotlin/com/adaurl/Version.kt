@@ -6,7 +6,11 @@ import kotlinx.cinterop.*
 /**
  * The version of the bundled Ada C++ library.
  */
-data class AdaVersion(val major: Int, val minor: Int, val revision: Int) {
+data class AdaVersion(
+    val major: Int,
+    val minor: Int,
+    val revision: Int,
+) {
     override fun toString(): String = "$major.$minor.$revision"
 }
 

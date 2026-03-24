@@ -191,7 +191,8 @@ class UrlSearchParamsList internal constructor(
 @OptIn(ExperimentalForeignApi::class)
 class UrlSearchParamsKeyIterator internal constructor(
     private val ptr: COpaquePointer,
-) : Iterator<String>, AutoCloseable {
+) : Iterator<String>,
+    AutoCloseable {
     override fun hasNext(): Boolean = ada_search_params_keys_iter_has_next(ptr)
 
     override fun next(): String =
@@ -210,7 +211,8 @@ class UrlSearchParamsKeyIterator internal constructor(
 @OptIn(ExperimentalForeignApi::class)
 class UrlSearchParamsValueIterator internal constructor(
     private val ptr: COpaquePointer,
-) : Iterator<String>, AutoCloseable {
+) : Iterator<String>,
+    AutoCloseable {
     override fun hasNext(): Boolean = ada_search_params_values_iter_has_next(ptr)
 
     override fun next(): String =
@@ -229,7 +231,8 @@ class UrlSearchParamsValueIterator internal constructor(
 @OptIn(ExperimentalForeignApi::class)
 class UrlSearchParamsEntryIterator internal constructor(
     private val ptr: COpaquePointer,
-) : Iterator<Pair<String, String>>, AutoCloseable {
+) : Iterator<Pair<String, String>>,
+    AutoCloseable {
     override fun hasNext(): Boolean = ada_search_params_entries_iter_has_next(ptr)
 
     override fun next(): Pair<String, String> =

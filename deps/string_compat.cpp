@@ -10,10 +10,20 @@
  * The mangled name corresponds to:
  *   std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>
  *       ::_M_replace_cold(char*, size_t, const char*, size_t, size_t)
+ *
+ * We use an asm label to bind the correct mangled symbol name, and plain
+ * static helper functions instead of lambdas for broadest compiler compatibility.
  */
+#include <cstring>
 
-// Use asm label to set the exact mangled symbol name so it matches what
-// the linker expects when resolving references from ada.o.
+static void smove(char* d, const char* s, unsigned long n) {
+    if (n) __builtin_memmove(d, s, n);
+}
+
+static void scopy(char* d, const char* s, unsigned long n) {
+    if (n) __builtin_memcpy(d, s, n);
+}
+
 void _ada_string_replace_cold_impl(
     char*         __p,
     unsigned long __len1,
@@ -30,13 +40,6 @@ void _ada_string_replace_cold_impl(
     unsigned long __len2,
     unsigned long __how_much)
 {
-    auto smove = [](char* d, const char* s, unsigned long n) noexcept {
-        if (n) __builtin_memmove(d, s, n);
-    };
-    auto scopy = [](char* d, const char* s, unsigned long n) noexcept {
-        if (n) __builtin_memcpy(d, s, n);
-    };
-
     if (__len2 && __len2 <= __len1)
         smove(__p, __s, __len2);
     if (__how_much && __len1 != __len2)

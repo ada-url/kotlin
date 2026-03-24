@@ -189,9 +189,32 @@ class UrlTest {
             val c = it.components
             assertEquals(6u, c.protocolEnd) // "https:"
             assertEquals(1234u, c.port)
+            // pathnameStart is always present (never null)
+            assertTrue(c.pathnameStart > 0u)
             assertNotNull(c.searchStart)
             assertNotNull(c.hashStart)
         }
+    }
+
+    @Test
+    fun urlComponentsNoOptionals() {
+        // A minimal URL has no port, search, or hash
+        val url = Url.parse("https://example.com/path")!!
+        url.use {
+            val c = it.components
+            assertNull(c.port)
+            assertNull(c.searchStart)
+            assertNull(c.hashStart)
+            // pathnameStart is always present
+            assertTrue(c.pathnameStart > 0u)
+        }
+    }
+
+    @Test
+    fun version() {
+        val v = adaVersionComponents()
+        assertTrue(v.major > 0, "expected major version > 0, got $v")
+        assertEquals(v.toString(), adaVersion())
     }
 
     @Test

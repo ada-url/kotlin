@@ -144,4 +144,15 @@ class UrlSearchParamsTest {
             assertEquals("Jörg", params.get("name"))
         }
     }
+
+    @Test
+    fun reset() {
+        UrlSearchParams.parse("a=1&b=2").use { params ->
+            assertEquals(2, params.size)
+            params.reset("x=9&y=8&z=7")
+            assertEquals(3, params.size)
+            assertEquals("9", params.get("x"))
+            assertNull(params.get("a"))
+        }
+    }
 }

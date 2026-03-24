@@ -5,15 +5,20 @@ import kotlinx.cinterop.*
 
 // Ada's C API takes `(const char* input, size_t length)` where length is the
 // UTF-8 byte count. Kotlin's String.length is UTF-16 code units, which differs
-// for any character outside the Basic Multilingual Plane. Use this extension
-// to get the correct byte count.
-internal val String.utf8ByteSize: ULong get() = encodeToByteArray().size.toULong()
+// for any character outside the Basic Multilingual Plane.
+//
+// We use memScoped { cstr.size - 1 } rather than encodeToByteArray().size to
+// avoid allocating a ByteArray on every call. cstr.size is the allocation size
+// of the null-terminated UTF-8 buffer, so subtracting 1 gives the byte length.
+@OptIn(ExperimentalForeignApi::class)
+internal val String.utf8ByteSize: ULong get() = memScoped { cstr.size.toULong() - 1u }
 
 /**
  * Defines the type of the host in a parsed URL.
  */
-@OptIn(ExperimentalForeignApi::class)
-enum class HostType(val value: UByte) {
+enum class HostType(
+    val value: UByte,
+) {
     Domain(0u),
     IPv4(1u),
     IPv6(2u),
@@ -27,8 +32,9 @@ enum class HostType(val value: UByte) {
 /**
  * Defines the scheme type of a parsed URL.
  */
-@OptIn(ExperimentalForeignApi::class)
-enum class SchemeType(val value: UByte) {
+enum class SchemeType(
+    val value: UByte,
+) {
     Http(0u),
     NotSpecial(1u),
     Https(2u),
@@ -66,8 +72,11 @@ data class UrlComponents(
     val hostEnd: UInt,
     /** `null` when port is omitted (`ada_url_omitted` = 0xffffffff) */
     val port: UInt?,
-    val pathnameStart: UInt?,
+    /** Always present; offset of the `/` starting the path. */
+    val pathnameStart: UInt,
+    /** `null` when no query string is present. */
     val searchStart: UInt?,
+    /** `null` when no fragment is present. */
     val hashStart: UInt?,
 )
 
@@ -78,7 +87,9 @@ data class UrlComponents(
  * managed by this class; call [close] (or use `use {}`) when you are done.
  */
 @OptIn(ExperimentalForeignApi::class)
-class Url private constructor(private val ptr: COpaquePointer) : AutoCloseable {
+class Url private constructor(
+    private val ptr: COpaquePointer,
+) : AutoCloseable {
     override fun close() {
         ada_free(ptr)
     }
@@ -142,7 +153,7 @@ class Url private constructor(private val ptr: COpaquePointer) : AutoCloseable {
                 hostStart = c.host_start,
                 hostEnd = c.host_end,
                 port = c.port.takeUnless { it == ada_url_omitted },
-                pathnameStart = c.pathname_start.takeUnless { it == ada_url_omitted },
+                pathnameStart = c.pathname_start,
                 searchStart = c.search_start.takeUnless { it == ada_url_omitted },
                 hashStart = c.hash_start.takeUnless { it == ada_url_omitted },
             )

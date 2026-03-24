@@ -206,6 +206,8 @@ curl -s "https://get.sdkman.io" | bash
 sdk install gradle 8.13
 ```
 
+> **Note (snap Gradle):** If you installed Gradle via snap, Kotlin/Native's bundled `libclang` may fail to load due to a glibc version mismatch with the snap sandbox. Use the sdkman or apt version instead, or run with `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 gradle ...`.
+
 #### Other Linux
 
 Install Gradle via [sdkman](https://sdkman.io) and a C++20-capable compiler via your package manager (`g++` 10+ or `clang++` 10+):
