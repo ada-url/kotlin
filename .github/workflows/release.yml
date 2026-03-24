@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish-tag:
-        description: 'The tag of the version to publish (e.g. v1.0.0)'
+        description: 'The tag of the version to publish (e.g. v0.1.0)'
         required: true
         type: string
 
@@ -12,6 +12,7 @@ concurrency:
   group: release
 
 jobs:
+  # ── 1. Run the full test suite on every platform first ──────────────────────
   test-release:
     name: Test release (${{ matrix.os }})
     strategy:
@@ -46,11 +47,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-konan-
 
-      - name: Build & Test
+      - name: Run tests
         run: gradle ${{ matrix.test-task }}
 
-  publish-release:
-    name: Publish release
+  # ── 2. Bump version, tag, and push ──────────────────────────────────────────
+  bump-version:
+    name: Bump version & tag
     needs: test-release
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -58,15 +60,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: true
-
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
 
       - name: Update version in build.gradle.kts
         env:
@@ -86,6 +79,69 @@ jobs:
         run: |
           git tag "${GIT_TAG}"
           git push origin "${GIT_TAG}"
+
+  # ── 3. Publish each platform's klib from its native host ────────────────────
+  #
+  # KMP requires each target's klib to be published from a compatible host.
+  # The root "kotlin-multiplatform" metadata publication is published once
+  # alongside the Linux artifact.
+  publish-platform:
+    name: Publish (${{ matrix.os }})
+    needs: bump-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: publishes linuxX64 klib + the root multiplatform metadata
+          - os: ubuntu-latest
+            publish-tasks: >-
+              publishLinuxX64PublicationToMavenCentralRepository
+              publishKotlinMultiplatformPublicationToMavenCentralRepository
+          # macOS arm64: publishes macosArm64 klib
+          - os: macos-15
+            publish-tasks: publishMacosArm64PublicationToMavenCentralRepository
+    runs-on: ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.publish-tag }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache Konan toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-konan-
+
+      - name: Publish to Maven Central
+        run: gradle ${{ matrix.publish-tasks }}
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+
+  # ── 4. Create GitHub release ─────────────────────────────────────────────────
+  github-release:
+    name: Create GitHub release
+    needs: publish-platform
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.publish-tag }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

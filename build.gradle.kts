@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 plugins {
     kotlin("multiplatform") version "2.3.20"
     `maven-publish`
+    signing
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
@@ -149,6 +150,73 @@ kotlin {
             getByName("${t.name}Test").dependsOn(nativeTest)
         }
     }
+}
+
+publishing {
+    repositories {
+        maven {
+            name = "MavenCentral"
+            // Releases go to the Central Portal staging API; snapshots go to OSSRH.
+            val isRelease = !version.toString().endsWith("-SNAPSHOT")
+            url =
+                uri(
+                    if (isRelease) {
+                        "https://central.sonatype.com/api/v1/publisher/upload"
+                    } else {
+                        "https://s01.oss.sonatype.org/content/repositories/snapshots/"
+                    },
+                )
+            credentials {
+                username =
+                    providers
+                        .gradleProperty("mavenCentralUsername")
+                        .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME"))
+                        .orNull
+                password =
+                    providers
+                        .gradleProperty("mavenCentralPassword")
+                        .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD"))
+                        .orNull
+            }
+        }
+    }
+
+    publications.withType<MavenPublication>().configureEach {
+        pom {
+            name = "ada"
+            description = "Fast WHATWG-compliant URL parser for Kotlin/Native, built on Ada"
+            url = "https://github.com/ada-url/kotlin"
+            licenses {
+                license {
+                    name = "MIT OR Apache-2.0"
+                    url = "https://opensource.org/licenses/MIT"
+                }
+            }
+            developers {
+                developer {
+                    id = "yagiz"
+                    name = "Yagiz Nizipli"
+                    email = "yagiz@nizipli.com"
+                }
+            }
+            scm {
+                connection = "scm:git:git://github.com/ada-url/kotlin.git"
+                developerConnection = "scm:git:ssh://github.com/ada-url/kotlin.git"
+                url = "https://github.com/ada-url/kotlin"
+            }
+        }
+    }
+}
+
+signing {
+    // Use in-memory PGP key supplied via environment variables (CI-friendly).
+    // Locally, falls back to gpg-agent if the env vars are absent.
+    val signingKey = providers.environmentVariable("SIGNING_KEY").orNull
+    val signingPassword = providers.environmentVariable("SIGNING_PASSWORD").orNull
+    if (signingKey != null && signingPassword != null) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+    }
+    sign(publishing.publications)
 }
 
 // buildAdaLib needs the KN GCC 8.3 toolchain on Linux, which is downloaded lazily
