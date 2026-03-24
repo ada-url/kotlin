@@ -8,6 +8,7 @@ plugins {
     `maven-publish`
     signing
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
+    id("com.gradleup.nmcp") version "1.4.4"
 }
 
 // Abstract task class so Gradle can inject ExecOperations (Gradle 9-compatible
@@ -260,35 +261,29 @@ kotlin {
     }
 }
 
-publishing {
-    repositories {
-        maven {
-            name = "MavenCentral"
-            // Releases go to the Central Portal staging API; snapshots go to OSSRH.
-            val isRelease = !version.toString().endsWith("-SNAPSHOT")
-            url =
-                uri(
-                    if (isRelease) {
-                        "https://central.sonatype.com/api/v1/publisher/upload"
-                    } else {
-                        "https://s01.oss.sonatype.org/content/repositories/snapshots/"
-                    },
-                )
-            credentials {
-                username =
-                    providers
-                        .gradleProperty("mavenCentralUsername")
-                        .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME"))
-                        .orNull
-                password =
-                    providers
-                        .gradleProperty("mavenCentralPassword")
-                        .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD"))
-                        .orNull
-            }
-        }
+// nmcp (New Maven Central Publishing) bundles all artifacts into a ZIP and
+// POSTs it to the Central Portal upload API — the correct protocol for
+// https://central.sonatype.com (the standard maven-publish plugin sends
+// per-file PUTs which the Central Portal does not support).
+nmcp {
+    publishAllPublicationsToCentralPortal {
+        username =
+            providers
+                .gradleProperty("mavenCentralUsername")
+                .orElse(providers.environmentVariable("MAVEN_CENTRAL_USERNAME"))
+                .orNull ?: ""
+        password =
+            providers
+                .gradleProperty("mavenCentralPassword")
+                .orElse(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD"))
+                .orNull ?: ""
+        // "USER_MANAGED" leaves the deployment in "Validated" state for manual review;
+        // change to "AUTOMATIC" to publish straight to Maven Central without review.
+        publishingType = "USER_MANAGED"
     }
+}
 
+publishing {
     publications.withType<MavenPublication>().configureEach {
         pom {
             name = "ada"

@@ -98,17 +98,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux: publishes linuxX64 klib + the root multiplatform metadata
+          # Linux publishes linuxX64 klib + the root kotlinMultiplatform metadata
           - os: ubuntu-latest
-            publish-tasks: >-
-              publishLinuxX64PublicationToMavenCentralRepository
-              publishKotlinMultiplatformPublicationToMavenCentralRepository
-          # macOS arm64: publishes macosArm64 klib
+            publish-task: publishAllPublicationsToCentralPortal
+          # macOS publishes macosArm64 klib
           - os: macos-15
-            publish-tasks: publishMacosArm64PublicationToMavenCentralRepository
-          # Windows: publishes mingwX64 klib
+            publish-task: publishAllPublicationsToCentralPortal
+          # Windows publishes mingwX64 klib
           - os: windows-latest
-            publish-tasks: publishMingwX64PublicationToMavenCentralRepository
+            publish-task: publishAllPublicationsToCentralPortal
     runs-on: ${{ matrix.os }}
     if: github.ref == 'refs/heads/main'
     steps:
@@ -138,7 +136,7 @@ jobs:
         run: C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-gcc
 
       - name: Publish to Maven Central
-        run: gradle ${{ matrix.publish-tasks }}
+        run: gradle ${{ matrix.publish-task }}
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
