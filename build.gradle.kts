@@ -30,27 +30,43 @@ abstract class BuildAdaLibTask
             val deps = depsDir.get().asFile
             outDir.mkdirs()
 
-            val isLinux = System.getProperty("os.name") == "Linux"
+            val osName = System.getProperty("os.name")
+            val isLinux = osName == "Linux"
+            val isWindows = osName.startsWith("Windows")
+
+            when {
+                isWindows -> buildWindows(deps, outDir, libFile)
+                isLinux -> buildLinux(deps, outDir, libFile)
+                else -> buildUnix(deps, outDir, libFile)
+            }
+        }
+
+        private fun buildLinux(
+            deps: File,
+            outDir: File,
+            libFile: File,
+        ) {
             val mainCompiler = System.getenv("CXX") ?: "c++"
             val adaObjFile = outDir.resolve("ada.o")
-
-            val compileCmd =
-                if (isLinux) {
-                    val konanDepsDir = "${System.getProperty("user.home")}/.konan/dependencies"
-                    val gccDir =
-                        File(konanDepsDir)
-                            .listFiles { f -> f.isDirectory && f.name.startsWith("x86_64-unknown-linux-gnu-gcc") }
-                            ?.firstOrNull()
-                            ?: error(
-                                "KN GCC toolchain not found in $konanDepsDir. " +
-                                    "It is downloaded automatically on first use — ensure the KN " +
-                                    "plugin has run at least once (e.g. via the cinterop task).",
-                            )
-                    val konanGpp = "${gccDir.absolutePath}/bin/x86_64-unknown-linux-gnu-g++"
-                    val sysroot = "${gccDir.absolutePath}/x86_64-unknown-linux-gnu/sysroot"
-                    val compatObjFile = outDir.resolve("string_compat.o")
-                    // Compile ada.cpp with the system C++ compiler (C++20 support), then
-                    // compile the ABI-compat shim with KN's GCC 8.3 (matching KN's libstdc++).
+            val konanDepsDir = "${System.getProperty("user.home")}/.konan/dependencies"
+            val gccDir =
+                File(konanDepsDir)
+                    .listFiles { f -> f.isDirectory && f.name.startsWith("x86_64-unknown-linux-gnu-gcc") }
+                    ?.firstOrNull()
+                    ?: error(
+                        "KN GCC toolchain not found in $konanDepsDir. " +
+                            "It is downloaded automatically on first use — ensure the KN " +
+                            "plugin has run at least once (e.g. via the cinterop task).",
+                    )
+            val konanGpp = "${gccDir.absolutePath}/bin/x86_64-unknown-linux-gnu-g++"
+            val sysroot = "${gccDir.absolutePath}/x86_64-unknown-linux-gnu/sysroot"
+            val compatObjFile = outDir.resolve("string_compat.o")
+            // Compile ada.cpp with the system C++ compiler (C++20 support), then
+            // compile the ABI-compat shim with KN's GCC 8.3 (matching KN's libstdc++).
+            execOps.exec {
+                commandLine(
+                    "sh",
+                    "-c",
                     """
                     "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
                         -I"${deps.absolutePath}" \
@@ -61,19 +77,55 @@ abstract class BuildAdaLibTask
                         -c "${deps.absolutePath}/string_compat.cpp" \
                         -o "$compatObjFile" && \
                     ar rcs "$libFile" "$adaObjFile" "$compatObjFile"
-                    """.trimIndent()
-                } else {
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        private fun buildUnix(
+            deps: File,
+            outDir: File,
+            libFile: File,
+        ) {
+            val mainCompiler = System.getenv("CXX") ?: "c++"
+            val adaObjFile = outDir.resolve("ada.o")
+            execOps.exec {
+                commandLine(
+                    "sh",
+                    "-c",
                     """
                     "$mainCompiler" -std=c++20 -O2 -fPIC -DADA_INCLUDE_URL_PATTERN=0 \
                         -I"${deps.absolutePath}" \
                         -c "${deps.absolutePath}/ada.cpp" \
                         -o "$adaObjFile" && \
                     ar rcs "$libFile" "$adaObjFile"
-                    """.trimIndent()
-                }
+                    """.trimIndent(),
+                )
+            }
+        }
 
+        private fun buildWindows(
+            deps: File,
+            outDir: File,
+            libFile: File,
+        ) {
+            // On Windows, KN links mingwX64 binaries with its own bundled clang/lld.
+            // We compile ada.cpp with clang++ (available on GitHub Actions windows-latest
+            // via LLVM) targeting the mingw ABI, then archive with llvm-ar.
+            // No ABI shim needed: MSVC/mingw's libstdc++ doesn't have the cold-path split.
+            val compiler = System.getenv("CXX") ?: "clang++"
+            val ar = "llvm-ar"
+            val adaObjFile = outDir.resolve("ada.o")
             execOps.exec {
-                commandLine("sh", "-c", compileCmd)
+                commandLine(
+                    "cmd",
+                    "/c",
+                    "$compiler -std=c++20 -O2 -DADA_INCLUDE_URL_PATTERN=0" +
+                        " -I\"${deps.absolutePath}\"" +
+                        " -c \"${deps.absolutePath}\\ada.cpp\"" +
+                        " -o \"$adaObjFile\"" +
+                        " && $ar rcs \"$libFile\" \"$adaObjFile\"",
+                )
             }
         }
     }
@@ -88,8 +140,10 @@ repositories {
 // Register the Ada static library build task.
 // Logic lives in BuildAdaLibTask above; all path resolution is deferred to
 // execution time so the KN toolchain has been downloaded before we need it.
+val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
 val buildAdaLib by tasks.registering(BuildAdaLibTask::class) {
     depsDir = layout.projectDirectory.dir("deps")
+    // mingw uses libada.a too — llvm-ar produces GNU-format archives compatible with lld
     outputLib = layout.buildDirectory.file("ada/libada.a")
 }
 
@@ -104,6 +158,7 @@ kotlin {
         when {
             hostOs == "Linux" -> listOf(linuxX64("linuxX64"))
             hostOs == "Mac OS X" -> listOf(macosArm64("macosArm64"))
+            hostOs.startsWith("Windows") -> listOf(mingwX64("mingwX64"))
             else -> error("Unsupported host: $hostOs / $hostArch")
         }
 

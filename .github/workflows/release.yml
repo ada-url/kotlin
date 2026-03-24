@@ -23,6 +23,8 @@ jobs:
             test-task: linuxX64Test
           - os: macos-15
             test-task: macosArm64Test
+          - os: windows-latest
+            test-task: mingwX64Test
     runs-on: ${{ matrix.os }}
     if: github.ref == 'refs/heads/main'
     steps:
@@ -46,6 +48,10 @@ jobs:
           key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-konan-
+
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm --no-progress -y
 
       - name: Run tests
         run: gradle ${{ matrix.test-task }}
@@ -100,6 +106,9 @@ jobs:
           # macOS arm64: publishes macosArm64 klib
           - os: macos-15
             publish-tasks: publishMacosArm64PublicationToMavenCentralRepository
+          # Windows: publishes mingwX64 klib
+          - os: windows-latest
+            publish-tasks: publishMingwX64PublicationToMavenCentralRepository
     runs-on: ${{ matrix.os }}
     if: github.ref == 'refs/heads/main'
     steps:
@@ -123,6 +132,10 @@ jobs:
           key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-konan-
+
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm --no-progress -y
 
       - name: Publish to Maven Central
         run: gradle ${{ matrix.publish-tasks }}
