@@ -45,9 +45,6 @@ jobs:
             test-task: linuxX64Test
             link-task: linkReleaseSharedLinuxX64
           - os: macos-15
-            test-task: macosX64Test
-            link-task: linkReleaseSharedMacosX64
-          - os: macos-14
             test-task: macosArm64Test
             link-task: linkReleaseSharedMacosArm64
     runs-on: ${{ matrix.os }}
