@@ -49,9 +49,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-konan-
 
-      - name: Install LLVM (Windows)
+      - name: Install mingw C++20 toolchain (Windows)
         if: runner.os == 'Windows'
-        run: choco install llvm --no-progress -y
+        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-gcc
 
       - name: Run tests
         run: gradle ${{ matrix.test-task }}
@@ -133,9 +133,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-konan-
 
-      - name: Install LLVM (Windows)
+      - name: Install mingw C++20 toolchain (Windows)
         if: runner.os == 'Windows'
-        run: choco install llvm --no-progress -y
+        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-gcc
 
       - name: Publish to Maven Central
         run: gradle ${{ matrix.publish-tasks }}

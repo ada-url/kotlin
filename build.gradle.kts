@@ -109,22 +109,77 @@ abstract class BuildAdaLibTask
             outDir: File,
             libFile: File,
         ) {
-            // On Windows, KN links mingwX64 binaries with its own bundled clang/lld.
-            // We compile ada.cpp with clang++ (available on GitHub Actions windows-latest
-            // via LLVM) targeting the mingw ABI, then archive with llvm-ar.
-            // No ABI shim needed: MSVC/mingw's libstdc++ doesn't have the cold-path split.
-            val compiler = System.getenv("CXX") ?: "clang++"
-            val ar = "llvm-ar"
+            // On Windows we compile ada.cpp with the MSYS2 mingw-w64 GCC 13 toolchain
+            // (installed via pacman in CI at C:\msys64\mingw64). GCC 13 has full C++20
+            // support including <ranges>, <bit>, etc. It produces mingw-ABI output so
+            // KN's lld can resolve libstdc++/libgcc from its bundled sysroot.
+            //
+            // KN's bundled g++ (GCC 8) lacks C++20 headers, and KN's bundled LLVM 19
+            // "essentials" has no C++ standard library headers at all.
+            //
+            // Arguments are passed as a list — no "cmd /c" string — so Gradle handles
+            // quoting correctly regardless of spaces or backslashes in paths.
+            val konanDepsDir =
+                File(System.getenv("USERPROFILE") ?: System.getProperty("user.home"))
+                    .resolve(".konan/dependencies")
+            val mingwDir =
+                konanDepsDir
+                    .listFiles { f -> f.isDirectory && f.name.startsWith("msys2-mingw-w64-x86_64") }
+                    ?.maxByOrNull { it.name }
+                    ?: error(
+                        "KN mingw toolchain not found in $konanDepsDir. " +
+                            "It is downloaded on first use — ensure cinterop has run at least once.",
+                    )
+
+            // Modern GCC 13 from MSYS2 (installed via pacman in CI) for ada.cpp (C++20)
+            // and the string_compat shim — both compiled with the same toolchain so
+            // libstdc++ symbol references are consistent.
+            val gpp13 = File("C:/msys64/mingw64/bin/g++.exe")
+            // KN's own ar for archiving (format compatible with KN's lld)
+            val ar = mingwDir.resolve("bin/ar.exe")
             val adaObjFile = outDir.resolve("ada.o")
+            val compatObjFile = outDir.resolve("string_compat.o")
+
+            // Step 1: compile ada.cpp → ada.o with GCC 13 (full C++20 support)
             execOps.exec {
                 commandLine(
-                    "cmd",
-                    "/c",
-                    "$compiler -std=c++20 -O2 -DADA_INCLUDE_URL_PATTERN=0" +
-                        " -I\"${deps.absolutePath}\"" +
-                        " -c \"${deps.absolutePath}\\ada.cpp\"" +
-                        " -o \"$adaObjFile\"" +
-                        " && $ar rcs \"$libFile\" \"$adaObjFile\"",
+                    gpp13.absolutePath,
+                    "-std=c++20",
+                    "-O2",
+                    "-DADA_INCLUDE_URL_PATTERN=0",
+                    "-I",
+                    deps.absolutePath,
+                    "-c",
+                    deps.resolve("ada.cpp").absolutePath,
+                    "-o",
+                    adaObjFile.absolutePath,
+                )
+            }
+
+            // Step 2: compile string_compat.cpp → string_compat.o
+            // Use the same GCC 13 that compiled ada.cpp — the shim must match the
+            // same libstdc++ ABI that ada.o references, so they resolve together.
+            // KN's bundled msys2 sysroot is headers+libs only, not a full compiler.
+            execOps.exec {
+                commandLine(
+                    gpp13.absolutePath,
+                    "-std=c++11",
+                    "-O2",
+                    "-c",
+                    deps.resolve("string_compat.cpp").absolutePath,
+                    "-o",
+                    compatObjFile.absolutePath,
+                )
+            }
+
+            // Step 3: archive both objects → libada.a
+            execOps.exec {
+                commandLine(
+                    ar.absolutePath,
+                    "rcs",
+                    libFile.absolutePath,
+                    adaObjFile.absolutePath,
+                    compatObjFile.absolutePath,
                 )
             }
         }
