@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+max_line_length = 120
+
+[*.kts]
+# ktlint configuration for Kotlin scripts
+ij_kotlin_imports_layout = *
+
+[*.kt]
+# Allow wildcard imports only for cinterop-generated packages (adaC.*)
+# and kotlinx.cinterop.* which has too many symbols to enumerate explicitly.
+ktlint_standard_no-wildcard-imports = disabled

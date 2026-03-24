@@ -1,0 +1,55 @@
+name: Update Ada
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Check for new Ada releases weekly on Mondays at 09:00 UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  update:
+    name: Update Ada single-header
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Download latest Ada single-header release
+        run: .github/update-ada.sh
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet deps/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get new Ada version
+        if: steps.diff.outputs.changed == 'true'
+        id: version
+        run: |
+          VERSION=$(grep -oP '(?<=ADA_VERSION ")[^"]+' deps/ada.h | head -1)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push updated deps
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          ADA_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deps/
+          git commit -m "chore: update ada to ${ADA_VERSION}"
+          git push
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "chore: update Ada to ${{ steps.version.outputs.version }}"
+          body: "Automated update of the Ada single-header files to version ${{ steps.version.outputs.version }}."
+          branch: chore/update-ada-${{ steps.version.outputs.version }}
+          labels: dependencies

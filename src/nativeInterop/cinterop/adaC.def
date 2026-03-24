@@ -1,0 +1,3 @@
+headers = ada_c.h
+headerFilter = ada_c.h
+compilerOpts = -DADA_INCLUDE_URL_PATTERN=0
