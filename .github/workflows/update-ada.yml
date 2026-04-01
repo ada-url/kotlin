@@ -77,7 +77,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Cache Konan toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.konan
           key: ${{ runner.os }}-konan-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
