@@ -8,7 +8,7 @@ plugins {
     `maven-publish`
     signing
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
-    id("com.gradleup.nmcp") version "1.4.4"
+    id("com.gradleup.nmcp") version "1.5.0"
 }
 
 // Abstract task class so Gradle can inject ExecOperations (Gradle 9-compatible
