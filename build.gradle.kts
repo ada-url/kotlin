@@ -4,7 +4,7 @@ import org.gradle.process.ExecOperations
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
-    kotlin("multiplatform") version "2.3.20"
+    kotlin("multiplatform") version "2.3.21"
     `maven-publish`
     signing
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
